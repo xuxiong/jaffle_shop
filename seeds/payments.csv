@@ -1,0 +1,6 @@
+id,order_id,payment_method,amount
+1,1,credit_card,45.50
+2,2,gift_card,32.00
+3,3,coupon,0.00
+4,4,credit_card,27.40
+5,5,credit_card,52.10

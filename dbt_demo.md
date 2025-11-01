@@ -21,7 +21,6 @@
 - **Python**：3.10+。
 - **包管理**：uv（推荐安装：`brew install uv`）。
 - **工具**：VS Code + dbt Power User 插件（可选，但推荐）。
-- **文件夹**：创建项目根目录 `~/jaffle_shop_dbt`。
 
 ---
 
@@ -32,7 +31,7 @@
 #### 步骤 1: 设置 Docker 中的 PostgreSQL
 使用 Docker Compose 启动 Postgres 容器，作为数据仓库。
 
-1. 在项目根目录 `~/jaffle_shop_dbt` 创建 `docker-compose.yml`：
+1. 创建 `docker-compose.yml`：
    ```yaml
    version: '3.9'
    services:
@@ -65,7 +64,7 @@
 #### 步骤 2: 使用 uv 管理 Python 环境并安装 dbt
 借助 uv 创建隔离的虚拟环境并安装 dbt-postgres 适配器。
 
-1. 在 `~/jaffle_shop_dbt` 准备虚拟环境：
+1. 准备虚拟环境：
    `uv venv .venv --python 3.12`
 
 2. 激活虚拟环境：
@@ -84,9 +83,7 @@
 
 1. 初始化：
    ```bash
-   cd ~/jaffle_shop_dbt
    dbt init jaffle_shop --skip-profile-setup
-   cd jaffle_shop
    ```
 
 2. 更新 `dbt_project.yml`（添加层级配置）：
@@ -135,13 +132,7 @@
 
 #### 步骤 5: 准备种子数据 (Seeds)
 1. 在 `seeds/` 目录创建 `customers.csv`, `orders.csv`, `payments.csv`。
-   示例 `seeds/customers.csv`:
-   ```csv
-   id,first_name,last_name
-   1,Michael,P.
-   2,Shawn,M.
-   ...
-   ```
+   这些文件包含完整的种子数据，用于初始化数据库表。
 2. 运行 seeds:
    `dbt seed`
 
@@ -149,23 +140,41 @@
 1. **Staging 层**：创建 `models/staging/stg_customers.sql` 等文件，进行基础清洗和重命名。
    ```sql
    -- models/staging/stg_customers.sql
-   select id as customer_id, first_name, last_name from {{ source('jaffle_shop', 'customers') }}
+   {{ config(materialized='view') }}
+
+   select
+     id as customer_id,
+     name as customer_name,
+     email as customer_email
+   from {{ source('jaffle_shop', 'customers') }}
+   where email is not null
    ```
 
 2. **Marts 层**：创建 `models/marts/dim_customers.sql` 和 `fact_orders.sql`，构建分析模型。
    ```sql
    -- models/marts/fact_orders.sql
+   {{ config(materialized='table') }}
+
+   with payments as (
+     select
+       order_id,
+       sum(payment_amount) as total_payment_amount
+     from {{ ref('stg_payments') }}
+     group by order_id
+   )
+
    select
-       o.id as order_id,
-       o.customer_id,
-       o.order_date,
-       o.status as order_status,
-       p.amount as order_amount
-   from {{ source('jaffle_shop', 'orders') }} o
-   left join {{ source('jaffle_shop', 'payments') }} p on o.id = p.order_id
+     o.order_id,
+     o.customer_id,
+     o.order_date,
+     o.status as order_status,
+     o.order_amount,
+     coalesce(p.total_payment_amount, 0) as payment_amount
+   from {{ ref('stg_orders') }} as o
+   left join payments as p on o.order_id = p.order_id
    ```
 
-3. **定义 sources**：在 `models/staging/schema.yml` 添加：
+3. **定义 sources**：在 `models/schema.yml` 添加：
    ```yaml
    version: 2
    sources:
@@ -177,7 +186,7 @@
          - name: payments
    ```
 
-4. 删除默认示例： `rm -rf models/example`
+
 
 #### 步骤 7: 构建统计指标层 (Metrics Layer)
 > **最佳实践**: 将指标模型设置为 **增量 (incremental)**，以便在生产环境中高效更新，避免全量刷新。
@@ -225,14 +234,16 @@
        d.order_date,
        d.orders_count,
        d.gross_revenue,
-       d.avg_order_value,
-       d.completion_rate,
-       round(avg(d.gross_revenue) over (order by d.order_date rows between 6 preceding and current row), 2) as revenue_rolling_7d,
+       round(d.avg_order_value, 1) as avg_order_value,
+       round(d.completion_rate, 1) as completion_rate,
+       cast(round(avg(d.gross_revenue) over (order by d.order_date rows between 6 preceding and current row), 2) as decimal(10,2)) as revenue_rolling_7d,
        c.active_customers,
        c.repeat_customers,
-       round(c.repeat_customers::numeric / nullif(c.active_customers, 0), 4) as repeat_purchase_rate
+       cast(round(c.repeat_customers::numeric / nullif(c.active_customers, 0), 4) as decimal(10,4)) as repeat_purchase_rate
    from daily_rollup d
    left join customer_rollup c using (order_date)
+   order by d.order_date
+
    {% if is_incremental() %}
    -- this filter will only be applied on an incremental run
    where order_date > (select max(order_date) from {{ this }})
@@ -271,25 +282,49 @@
 
 3. **编写单元测试**
    > **核心学习点**: 测试增量模型时，需在 `given` 块中用 `this` 关键字引用模型自身来模拟历史数据。
-   
-   在 `tests/unit/` 下创建 `test_fact_orders_metrics.yml`:
+
+   在 `tests/unit/` 下创建 `test_fact_orders.yml`:
    ```yaml
    version: 2
    unit_tests:
+     - name: fact_orders_payment_amount_matches
+       model: fact_orders
+       given:
+         - input: ref('stg_orders')
+           format: sql
+           rows: |
+             select *
+             from (values
+               (1, 1, cast('2024-01-01' as date), 'completed', cast(30 as numeric)),
+               (2, 2, cast('2024-01-02' as date), 'completed', cast(50 as numeric))
+             ) as stg_orders_fixture(order_id, customer_id, order_date, status, order_amount)
+         - input: ref('stg_payments')
+           format: sql
+           rows: |
+             select *
+             from (values
+               (101, 1, 'credit_card', cast(30 as numeric)),
+               (102, 2, 'bank_transfer', cast(50 as numeric))
+             ) as stg_payments_fixture(payment_id, order_id, payment_method, payment_amount)
+       expect:
+         rows:
+           - {order_id: 1, payment_amount: 30}
+           - {order_id: 2, payment_amount: 50}
+
      - name: fact_orders_metrics_rollup
        model: fact_orders_metrics
        given:
          - input: ref('fact_orders')
            rows:
-             - {id: 1, customer_id: 1, order_date: '2024-03-01', status: 'completed', amount: 40}
-             - {id: 2, customer_id: 1, order_date: '2024-03-10', status: 'completed', amount: 60}
-             - {id: 3, customer_id: 2, order_date: '2024-03-10', status: 'cancelled', amount: 20}
-         - input: this # 引用模型自身，模拟增量加载
-           rows: [] # 首次运行时，模型是空的
+             - {order_id: 10, customer_id: 1, order_date: '2024-03-01', order_status: 'completed', order_amount: 40, payment_amount: 40}
+             - {order_id: 11, customer_id: 1, order_date: '2024-03-10', order_status: 'completed', order_amount: 60, payment_amount: 60}
+             - {order_id: 12, customer_id: 2, order_date: '2024-03-10', order_status: 'cancelled', order_amount: 20, payment_amount: 0}
+         - input: this
+           rows: []
        expect:
          rows:
-           - {order_date: '2024-03-01', gross_revenue: 40, completion_rate: 1.0, repeat_purchase_rate: 0.0}
-           - {order_date: '2024-03-10', gross_revenue: 80, completion_rate: 0.5, repeat_purchase_rate: 0.5}
+           - {order_date: '2024-03-01', orders_count: 1, gross_revenue: 40, avg_order_value: 40.0, revenue_rolling_7d: 40.00, completion_rate: 1.0, active_customers: 1, repeat_customers: 0, repeat_purchase_rate: 0.0000}
+           - {order_date: '2024-03-10', orders_count: 2, gross_revenue: 80, avg_order_value: 40.0, revenue_rolling_7d: 60.00, completion_rate: 0.5, active_customers: 2, repeat_customers: 1, repeat_purchase_rate: 0.5000}
    ```
    > **注意：数据类型问题**
    > 上述 `expect` 块很可能会因为数据类型不匹配失败（例如 `1.0` vs `1.000000`）。这是 dbt 单元测试的常见挑战，解决它需要精确匹配数据库返回的数字精度。为演示，我们在此保留该问题。

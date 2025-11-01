@@ -23,6 +23,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
       - name: Wait for Postgres to be ready
         env:
           PGPASSWORD: jaffle_pass
@@ -49,13 +54,18 @@ jobs:
                 user: jaffle_user
                 password: jaffle_pass
                 dbname: jaffle_db
-                schema: jaffle
+                schema: public
                 port: 5432
           YML
 
-      - name: Install dbt and run tests
+      - name: Install dbt dependencies
         run: |
           python -m pip install --upgrade pip
           pip install dbt-postgres
+
+      - name: Run dbt seed and build
+        run: |
           dbt debug
+          dbt seed
+          dbt run --select stg_customers stg_orders stg_payments
           dbt test

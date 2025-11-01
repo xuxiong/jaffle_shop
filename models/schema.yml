@@ -18,3 +18,16 @@ models:
       - name: customer_email
         tests:
           - not_null
+
+  - name: fact_orders_metrics
+    columns:
+      - name: order_date
+        tests:
+          - not_null
+      - name: gross_revenue
+        tests:
+          - not_null
+          - positive_value
+      - name: repeat_purchase_rate
+        tests:
+          - is_between_0_and_1

@@ -1,0 +1,41 @@
+version: 2
+
+unit_tests:
+  - name: fact_orders_payment_amount_matches
+    model: fact_orders
+    given:
+      - input: ref('stg_orders')
+        format: sql
+        rows: |
+          select *
+          from (values
+            (1, 1, cast('2024-01-01' as date), 'completed', cast(30 as numeric)),
+            (2, 2, cast('2024-01-02' as date), 'completed', cast(50 as numeric))
+          ) as stg_orders_fixture(order_id, customer_id, order_date, status, order_amount)
+      - input: ref('stg_payments')
+        format: sql
+        rows: |
+          select *
+          from (values
+            (101, 1, 'credit_card', cast(30 as numeric)),
+            (102, 2, 'bank_transfer', cast(50 as numeric))
+          ) as stg_payments_fixture(payment_id, order_id, payment_method, payment_amount)
+    expect:
+      rows:
+        - {order_id: 1, payment_amount: 30}
+        - {order_id: 2, payment_amount: 50}
+
+  - name: fact_orders_metrics_rollup
+    model: fact_orders_metrics
+    given:
+      - input: ref('fact_orders')
+        rows:
+          - {order_id: 10, customer_id: 1, order_date: '2024-03-01', order_status: 'completed', order_amount: 40, payment_amount: 40}
+          - {order_id: 11, customer_id: 1, order_date: '2024-03-10', order_status: 'completed', order_amount: 60, payment_amount: 60}
+          - {order_id: 12, customer_id: 2, order_date: '2024-03-10', order_status: 'cancelled', order_amount: 20, payment_amount: 0}
+      - input: this
+        rows: []
+    expect:
+      rows:
+        - {order_date: '2024-03-01', orders_count: 1, gross_revenue: 40, avg_order_value: 40.0, revenue_rolling_7d: 40.00, completion_rate: 1.0, active_customers: 1, repeat_customers: 0, repeat_purchase_rate: 0.0000}
+        - {order_date: '2024-03-10', orders_count: 2, gross_revenue: 80, avg_order_value: 40.0, revenue_rolling_7d: 60.00, completion_rate: 0.5, active_customers: 2, repeat_customers: 1, repeat_purchase_rate: 0.5000}

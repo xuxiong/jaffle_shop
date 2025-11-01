@@ -5,10 +5,57 @@ on: [push]
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: jaffle_db
+          POSTGRES_USER: jaffle_user
+          POSTGRES_PASSWORD: jaffle_pass
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U jaffle_user -d jaffle_db"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=5
+
     steps:
       - uses: actions/checkout@v4
-      - name: Run dbt
+
+      - name: Wait for Postgres to be ready
+        env:
+          PGPASSWORD: jaffle_pass
         run: |
+          sudo apt-get update -y
+          sudo apt-get install -y postgresql-client
+          echo "Waiting for postgres..."
+          for i in {1..30}; do
+            pg_isready -h localhost -p 5432 -U jaffle_user -d jaffle_db && break
+            echo "Postgres not ready yet ($i/30) — sleeping 2s"
+            sleep 2
+          done
+
+      - name: Create dbt profile
+        run: |
+          mkdir -p ~/.dbt
+          cat > ~/.dbt/profiles.yml <<'YML'
+          jaffle_shop:
+            target: dev
+            outputs:
+              dev:
+                type: postgres
+                host: localhost
+                user: jaffle_user
+                password: jaffle_pass
+                dbname: jaffle_db
+                schema: jaffle
+                port: 5432
+          YML
+
+      - name: Install dbt and run tests
+        run: |
+          python -m pip install --upgrade pip
           pip install dbt-postgres
           dbt debug
           dbt test

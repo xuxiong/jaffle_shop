@@ -2,32 +2,117 @@ version: 2
 
 sources:
   - name: jaffle_shop
+    description: "咖啡店业务的核心数据源，包含客户、订单和支付信息"
     schema: public
     tables:
       - name: customers
+        description: "客户基础信息表，包含客户ID、姓名和邮箱"
       - name: orders
+        description: "订单信息表，包含订单ID、客户ID、订单日期、状态和金额"
       - name: payments
+        description: "支付信息表，包含支付ID、订单ID、支付方式和支付金额"
 
 models:
   - name: stg_customers
+    description: "客户信息的staging表，对原始客户数据进行轻量级清洗和标准化"
     columns:
       - name: customer_id
+        description: "客户唯一标识符"
         tests:
           - unique
           - not_null
+      - name: customer_name
+        description: "客户姓名"
+        tests:
+          - not_null
       - name: customer_email
+        description: "客户邮箱地址，用于客户沟通和身份验证"
         tests:
           - not_null
 
   - name: fact_orders_metrics
+    description: "订单指标事实表，汇总每日订单统计、收入指标和客户行为分析"
     columns:
       - name: order_date
+        description: "订单日期，用于按日期聚合分析"
+        tests:
+          - not_null
+      - name: orders_count
+        description: "当日订单总数"
         tests:
           - not_null
       - name: gross_revenue
+        description: "当日总收入，基于订单金额计算"
         tests:
           - not_null
           - positive_value
+      - name: avg_order_value
+        description: "平均订单价值，当日所有订单金额的平均值"
+        tests:
+          - not_null
+      - name: revenue_rolling_7d
+        description: "7日滚动平均收入，过去7天收入的平均值"
+        tests:
+          - not_null
+      - name: completion_rate
+        description: "订单完成率，完成状态订单占总订单的比例"
+        tests:
+          - not_null
+      - name: active_customers
+        description: "活跃客户数，当日有订单的唯一客户数量"
+        tests:
+          - not_null
+      - name: repeat_customers
+        description: "重复购买客户数，当日有多次购买记录的唯一客户数量"
+        tests:
+          - not_null
       - name: repeat_purchase_rate
+        description: "重复购买率，表示有多次购买的客户占比，范围0-1"
         tests:
           - is_between_0_and_1
+
+  - name: fact_orders
+    description: "订单事实表，整合订单和支付信息，计算每个订单的实际支付金额"
+    columns:
+      - name: order_id
+        description: "订单唯一标识符"
+        tests:
+          - unique
+          - not_null
+      - name: customer_id
+        description: "客户ID，关联到客户维度表"
+        tests:
+          - not_null
+      - name: order_date
+        description: "订单日期"
+        tests:
+          - not_null
+      - name: order_status
+        description: "订单状态（completed, cancelled等）"
+        tests:
+          - not_null
+      - name: order_amount
+        description: "订单金额"
+        tests:
+          - not_null
+      - name: payment_amount
+        description: "实际支付金额"
+        tests:
+          - not_null
+
+  - name: dim_customers
+    description: "客户维度表，包含去重后的客户基础信息"
+    columns:
+      - name: customer_id
+        description: "客户唯一标识符"
+        tests:
+          - unique
+          - not_null
+      - name: customer_name
+        description: "客户姓名"
+        tests:
+          - not_null
+      - name: customer_email
+        description: "客户邮箱地址"
+        tests:
+          - not_null

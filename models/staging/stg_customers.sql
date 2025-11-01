@@ -1,3 +1,6 @@
+-- 客户信息的staging表
+-- 业务逻辑：从原始客户表中提取基础信息，过滤掉无效邮箱记录
+-- 数据质量：确保邮箱字段不为空
 {{ config(materialized='view') }}
 
 select

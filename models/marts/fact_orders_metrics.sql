@@ -1,5 +1,10 @@
+-- 订单指标事实表（增量更新）
+-- 业务逻辑：计算每日订单统计指标，包括收入、客户行为和趋势分析
+-- 增量策略：基于order_date作为唯一键，支持增量更新
+-- 关键指标：订单数量、收入、平均订单价值、完成率、活跃客户数、重复购买率等
 {{ config(materialized='incremental', unique_key='order_date') }}
 
+-- 基础订单数据，标记完成状态
 with base_orders as (
     select
         order_date::date as order_date,
@@ -8,7 +13,9 @@ with base_orders as (
         order_status,
         case when order_status = 'completed' then 1 else 0 end as is_completed
     from {{ ref('fact_orders') }}
-), ranked_orders as (
+),
+-- 为每个客户按时间排序订单，用于识别重复购买
+ranked_orders as (
     select
         order_date,
         customer_id,
@@ -16,7 +23,9 @@ with base_orders as (
         is_completed,
         row_number() over (partition by customer_id order by order_date) as order_number
     from base_orders
-), daily_rollup as (
+),
+-- 每日汇总统计
+daily_rollup as (
     select
         order_date,
         count(*) as orders_count,
@@ -25,7 +34,9 @@ with base_orders as (
         sum(is_completed)::numeric / nullif(count(*), 0) as completion_rate
     from base_orders
     group by 1
-), customer_rollup as (
+),
+-- 客户行为分析汇总
+customer_rollup as (
     select
         order_date,
         count(distinct customer_id) as active_customers,

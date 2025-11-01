@@ -19,7 +19,7 @@
 #### 先决条件
 - **系统**：macOS/Linux/Windows（WSL），Docker Desktop 已安装。
 - **Python**：3.10+。
-- **包管理**：uv（推荐安装：`brew install uv`）。
+- **包管理**：uv（macOS安装：`brew install uv`）。
 - **工具**：VS Code + dbt Power User 插件（可选，但推荐）。
 
 ---
@@ -383,7 +383,12 @@ uv run dbt test --select fact_orders_metrics_rollup
    你将看到除了 `fact_orders_metrics_rollup` 之外的所有测试都通过了。
 
 2. **生成和查看文档**：
-   `dbt docs generate && dbt docs serve`
+   dbt文档通过YAML配置文件（如`models/schema.yml`）描述项目中的模型、列、测试等元数据，确保文档准确反映数据模型结构和业务逻辑。
+
+   运行以下命令生成并启动本地文档服务器查看：
+   `uv run dbt docs generate && uv run dbt docs serve`
+
+   这将启动一个本地Web服务器，通常在http://localhost:8080，可在浏览器中查看项目文档。
 
 3. **清理**：
    `dbt clean && docker compose down -v`

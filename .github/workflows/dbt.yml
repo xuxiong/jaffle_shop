@@ -67,5 +67,5 @@ jobs:
         run: |
           dbt debug
           dbt seed
-          dbt run --select stg_customers stg_orders stg_payments
+          dbt run
           dbt test
